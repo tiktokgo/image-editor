@@ -574,122 +574,102 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
   return (
     <div ref={containerRef} style={{ height: "100vh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
 
-      {/* ── Toolbar: Save is static, rest scrolls on mobile ── */}
-      <div
-        className={`${design.toolbar} flex-shrink-0 flex items-center`}
-        style={{ height: 56 }}
-      >
-        {/* Save button — left side (Hebrew) */}
-        {!t.saveLast && (
-          <div className={`flex items-center gap-1.5 ${t.savePadding} flex-shrink-0`}>
-            <button
-              onClick={handleSave}
-              disabled={saving || !canvasReady}
-              className={`px-4 py-1.5 rounded text-sm font-semibold transition-colors ${
-                savedUrl ? "bg-green-600 text-white" : "bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-              }`}
-            >
+      {/* ── Toolbar ── */}
+      <div className={`${design.toolbar} flex-shrink-0 flex items-center`} style={{ height: 56 }}>
+
+        {/* ── HEBREW: [Save | divider | static] [scrollable → undo/redo/del | spacer | color | tools] ── */}
+        {!t.saveLast && (<>
+          <div className="flex items-center gap-1.5 pl-3 flex-shrink-0">
+            <button onClick={handleSave} disabled={saving || !canvasReady}
+              className={`px-4 py-1.5 rounded text-sm font-semibold transition-colors ${savedUrl ? "bg-green-600 text-white" : "bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"}`}>
               {saving ? t.saving : savedUrl ? t.saved : t.save}
             </button>
             <div className={design.divider} />
           </div>
-        )}
+          <div style={{ flex: 1, overflowX: "auto", overflowY: "hidden", height: "100%" }}>
+            <div className="flex items-center gap-1.5 px-2 h-full" style={{ minWidth: "max-content" }}>
+              <button onClick={undo} title={t.undoTitle} className={design.iconBtn}>↩</button>
+              <button onClick={redo} title={t.redoTitle} disabled={!canRedo} className={`${design.iconBtn} disabled:opacity-40 disabled:cursor-not-allowed`}>↪</button>
+              <button onClick={clearAll} title={t.clearTitle} className={design.clearBtn}>🗑</button>
+              {selectedObjectType === "i-text" && (
+                <button onClick={handleEditText} title={t.editTextTitle} className={design.editTextBtn}>{t.editText}</button>
+              )}
+              <div className="flex-1" />
+              {showColorStroke && (<>
+                <label className="flex flex-col items-center gap-0.5 cursor-pointer" title={t.colorTitle}>
+                  <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="w-7 h-7 rounded border-0 p-0 cursor-pointer" />
+                  <span className={design.sliderLabel}>{t.colorLabel}</span>
+                </label>
+                {showStrokeSlider && (
+                  <label className="flex flex-col items-center gap-0.5" title={t.strokeTitle}>
+                    <input type="range" min={1} max={20} value={strokeWidth} onChange={(e) => setStrokeWidth(Number(e.target.value))} className="w-20 accent-blue-400" />
+                    <span className={design.sliderLabel}>{t.strokeLabel} {strokeWidth}</span>
+                  </label>
+                )}
+                {showFontSize && (
+                  <label className="flex flex-col items-center gap-0.5" title={t.fontTitle}>
+                    <input type="range" min={10} max={120} value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} className="w-20 accent-blue-400" />
+                    <span className={design.sliderLabel}>{t.fontSizeLabel} {fontSize}</span>
+                  </label>
+                )}
+                <div className={`${design.divider} mx-0.5`} />
+              </>)}
+              <ToolBtn active={tool === "draw"} onClick={() => setTool("draw")} title={t.draw}><span>✏️</span><span>{t.draw}</span></ToolBtn>
+              <ToolBtn active={tool === "text"} onClick={handleAddText} title={t.text}><span className="font-bold text-sm">T</span><span>{t.text}</span></ToolBtn>
+              <ToolBtn active={tool === "rect"} onClick={() => setTool("rect")} title={t.rect}><span>▭</span><span>{t.rect}</span></ToolBtn>
+              <ToolBtn active={tool === "ellipse"} onClick={() => setTool("ellipse")} title={t.ellipse}><span>○</span><span>{t.ellipse}</span></ToolBtn>
+              <ToolBtn active={tool === "line"} onClick={() => setTool("line")} title={t.line}><span>╱</span><span>{t.line}</span></ToolBtn>
+              <ToolBtn active={tool === "crop"} onClick={() => setTool("crop")} title={t.crop}><span>✂️</span><span>{t.crop}</span></ToolBtn>
+            </div>
+          </div>
+        </>)}
 
-        {/* Scrollable area for all other controls */}
-        <div style={{ flex: 1, overflowX: "auto", overflowY: "hidden", height: "100%" }}>
-        <div className="flex items-center gap-1.5 px-2 h-full" style={{ minWidth: "max-content" }}>
-
-        {/* Undo / Redo / Clear all */}
-        <button onClick={undo} title={t.undoTitle} className={design.iconBtn}>↩</button>
-        <button onClick={redo} title={t.redoTitle} disabled={!canRedo} className={`${design.iconBtn} disabled:opacity-40 disabled:cursor-not-allowed`}>↪</button>
-        <button onClick={clearAll} title={t.clearTitle} className={design.clearBtn}>🗑</button>
-        {/* Edit text button — appears when text is selected, lets mobile users enter editing mode */}
-        {selectedObjectType === "i-text" && (
-          <button onClick={handleEditText} title={t.editTextTitle} className={design.editTextBtn}>{t.editText}</button>
-        )}
-
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {/* Color + stroke + font size (when relevant) */}
-        {showColorStroke && (
-          <>
-            <label className="flex flex-col items-center gap-0.5 cursor-pointer" title={t.colorTitle}>
-              <input
-                type="color"
-                value={color}
-                onChange={(e) => setColor(e.target.value)}
-                className="w-7 h-7 rounded border-0 p-0 cursor-pointer"
-              />
-              <span className={design.sliderLabel}>{t.colorLabel}</span>
-            </label>
-            {showStrokeSlider && (
-              <label className="flex flex-col items-center gap-0.5" title={t.strokeTitle}>
-                <input
-                  type="range"
-                  min={1}
-                  max={20}
-                  value={strokeWidth}
-                  onChange={(e) => setStrokeWidth(Number(e.target.value))}
-                  className="w-20 accent-blue-400"
-                />
-                <span className={design.sliderLabel}>{t.strokeLabel} {strokeWidth}</span>
-              </label>
+        {/* ── ENGLISH: [scrollable → tools | divider | color+width] [static → undo|redo|del | divider | Save] ── */}
+        {t.saveLast && (<>
+          <div style={{ flex: 1, overflowX: "auto", overflowY: "hidden", height: "100%" }}>
+            <div className="flex items-center gap-1.5 px-2 h-full" style={{ minWidth: "max-content" }}>
+              <ToolBtn active={tool === "draw"} onClick={() => setTool("draw")} title={t.draw}><span>✏️</span><span>{t.draw}</span></ToolBtn>
+              <ToolBtn active={tool === "text"} onClick={handleAddText} title={t.text}><span className="font-bold text-sm">T</span><span>{t.text}</span></ToolBtn>
+              <ToolBtn active={tool === "rect"} onClick={() => setTool("rect")} title={t.rect}><span>▭</span><span>{t.rect}</span></ToolBtn>
+              <ToolBtn active={tool === "ellipse"} onClick={() => setTool("ellipse")} title={t.ellipse}><span>○</span><span>{t.ellipse}</span></ToolBtn>
+              <ToolBtn active={tool === "line"} onClick={() => setTool("line")} title={t.line}><span>╱</span><span>{t.line}</span></ToolBtn>
+              <ToolBtn active={tool === "crop"} onClick={() => setTool("crop")} title={t.crop}><span>✂️</span><span>{t.crop}</span></ToolBtn>
+              {showColorStroke && (<>
+                <div className={`${design.divider} mx-0.5`} />
+                <label className="flex flex-col items-center gap-0.5 cursor-pointer" title={t.colorTitle}>
+                  <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="w-7 h-7 rounded border-0 p-0 cursor-pointer" />
+                  <span className={design.sliderLabel}>{t.colorLabel}</span>
+                </label>
+                {showStrokeSlider && (
+                  <label className="flex flex-col items-center gap-0.5" title={t.strokeTitle}>
+                    <input type="range" min={1} max={20} value={strokeWidth} onChange={(e) => setStrokeWidth(Number(e.target.value))} className="w-20 accent-blue-400" />
+                    <span className={design.sliderLabel}>{t.strokeLabel} {strokeWidth}</span>
+                  </label>
+                )}
+                {showFontSize && (
+                  <label className="flex flex-col items-center gap-0.5" title={t.fontTitle}>
+                    <input type="range" min={10} max={120} value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} className="w-20 accent-blue-400" />
+                    <span className={design.sliderLabel}>{t.fontSizeLabel} {fontSize}</span>
+                  </label>
+                )}
+              </>)}
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 pr-3 flex-shrink-0">
+            {selectedObjectType === "i-text" && (
+              <button onClick={handleEditText} title={t.editTextTitle} className={design.editTextBtn}>{t.editText}</button>
             )}
-            {showFontSize && (
-              <label className="flex flex-col items-center gap-0.5" title={t.fontTitle}>
-                <input
-                  type="range"
-                  min={10}
-                  max={120}
-                  value={fontSize}
-                  onChange={(e) => setFontSize(Number(e.target.value))}
-                  className="w-20 accent-blue-400"
-                />
-                <span className={design.sliderLabel}>{t.fontSizeLabel} {fontSize}</span>
-              </label>
-            )}
-            <div className={`${design.divider} mx-0.5`} />
-          </>
-        )}
-
-        {/* Tools */}
-        <ToolBtn active={tool === "draw"} onClick={() => setTool("draw")} title={t.draw}>
-          <span>✏️</span><span>{t.draw}</span>
-        </ToolBtn>
-        <ToolBtn active={tool === "text"} onClick={handleAddText} title={t.text}>
-          <span className="font-bold text-sm">T</span><span>{t.text}</span>
-        </ToolBtn>
-        <ToolBtn active={tool === "rect"} onClick={() => setTool("rect")} title={t.rect}>
-          <span>▭</span><span>{t.rect}</span>
-        </ToolBtn>
-        <ToolBtn active={tool === "ellipse"} onClick={() => setTool("ellipse")} title={t.ellipse}>
-          <span>○</span><span>{t.ellipse}</span>
-        </ToolBtn>
-        <ToolBtn active={tool === "line"} onClick={() => setTool("line")} title={t.line}>
-          <span>╱</span><span>{t.line}</span>
-        </ToolBtn>
-        <ToolBtn active={tool === "crop"} onClick={() => setTool("crop")} title={t.crop}>
-          <span>✂️</span><span>{t.crop}</span>
-        </ToolBtn>
-      </div>
-      </div>
-
-        {/* Save button — right side (English) */}
-        {t.saveLast && (
-          <div className={`flex items-center gap-1.5 ${t.savePadding} flex-shrink-0`}>
+            <button onClick={undo} title={t.undoTitle} className={design.iconBtn}>↩</button>
+            <button onClick={redo} title={t.redoTitle} disabled={!canRedo} className={`${design.iconBtn} disabled:opacity-40 disabled:cursor-not-allowed`}>↪</button>
+            <button onClick={clearAll} title={t.clearTitle} className={design.clearBtn}>🗑</button>
             <div className={design.divider} />
-            <button
-              onClick={handleSave}
-              disabled={saving || !canvasReady}
-              className={`px-4 py-1.5 rounded text-sm font-semibold transition-colors ${
-                savedUrl ? "bg-green-600 text-white" : "bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-              }`}
-            >
+            <button onClick={handleSave} disabled={saving || !canvasReady}
+              className={`px-4 py-1.5 rounded text-sm font-semibold transition-colors ${savedUrl ? "bg-green-600 text-white" : "bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"}`}>
               {saving ? t.saving : savedUrl ? t.saved : t.save}
             </button>
           </div>
-        )}
+        </>)}
+
       </div>
 
       {/* ── Canvas area: gray background, canvas centered inside ── */}
