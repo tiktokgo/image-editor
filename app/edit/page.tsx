@@ -8,6 +8,8 @@ export default async function EditPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const imageUrl =
     typeof params.image_url === "string" ? params.image_url : null;
+  const quoteId =
+    typeof params.quote_id === "string" ? params.quote_id : undefined;
 
   if (!imageUrl) {
     return (
@@ -29,5 +31,5 @@ export default async function EditPage({ searchParams }: PageProps) {
     );
   }
 
-  return <ImageEditor imageUrl={imageUrl} />;
+  return <ImageEditor imageUrl={imageUrl} quoteId={quoteId} />;
 }

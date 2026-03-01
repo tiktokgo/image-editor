@@ -11,6 +11,7 @@ type Tool = "select" | "draw" | "text" | "rect" | "ellipse" | "line" | "crop";
 
 interface Props {
   imageUrl: string;
+  quoteId?: string;
 }
 
 function ToolBtn({
@@ -40,7 +41,7 @@ function ToolBtn({
   );
 }
 
-export default function ImageEditor({ imageUrl }: Props) {
+export default function ImageEditor({ imageUrl, quoteId }: Props) {
   const canvasElRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fabricRef = useRef<FabricCanvas | null>(null);
@@ -431,13 +432,13 @@ export default function ImageEditor({ imageUrl }: Props) {
       const json = (await res.json()) as { url?: string; error?: string };
       if (!res.ok || !json.url) throw new Error(json.error ?? "שגיאה בשמירה");
       setSavedUrl(json.url);
-      window.parent.postMessage({ type: "image-editor-save", url: json.url }, "*");
+      window.parent.postMessage({ type: "image-editor-save", url: json.url, quoteId, originalUrl: imageUrl }, "*");
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
-  }, []);
+  }, [imageUrl, quoteId]);
 
   const showColorStroke = tool === "draw" || tool === "rect" || tool === "ellipse" || tool === "line" || tool === "text";
 
