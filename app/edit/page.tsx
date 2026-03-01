@@ -1,4 +1,5 @@
 import ImageEditor from "@/components/ImageEditor";
+import { t } from "@/lib/i18n";
 
 interface PageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
@@ -15,16 +16,16 @@ export default async function EditPage({ searchParams }: PageProps) {
     return (
       <div
         className="min-h-screen flex items-center justify-center bg-red-50"
-        dir="rtl"
+        dir={t.dir}
       >
         <div className="text-center p-8">
           <div className="text-6xl mb-4">⚠️</div>
-          <h1 className="text-2xl font-bold text-red-700 mb-2">פרמטר חסר</h1>
+          <h1 className="text-2xl font-bold text-red-700 mb-2">{t.missingParam}</h1>
           <p className="text-red-600">
-            יש לספק <code>image_url</code> בכתובת ה-URL.
+            {t.missingParamDesc}
           </p>
           <p className="text-gray-500 text-sm mt-4">
-            דוגמה: /edit?image_url=https://...
+            {t.missingParamExample}
           </p>
         </div>
       </div>

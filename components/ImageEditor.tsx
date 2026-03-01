@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { t, design } from "@/lib/i18n";
 import type {
   Canvas as FabricCanvas,
   FabricObject,
@@ -30,9 +31,7 @@ function ToolBtn({
       onClick={onClick}
       title={title}
       className={`flex flex-col items-center justify-center gap-0.5 px-2 py-1.5 rounded text-xs font-medium transition-colors select-none ${
-        active
-          ? "bg-blue-500 text-white shadow-inner"
-          : "bg-gray-700 text-gray-200 hover:bg-gray-600 border border-gray-600"
+        active ? design.toolBtnActive : design.toolBtn
       }`}
       style={{ minWidth: 44 }}
     >
@@ -167,7 +166,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
     canvas.setActiveObject(txt);
     canvas.renderAll();
     saveSnapshot();
-    showHint("הטקסט נוסף לתמונה - גרור אותו ושנה בהתאם");
+    showHint(t.hintText);
     setToolRef.current("select");
   }, [saveSnapshot, showHint]);
 
@@ -475,11 +474,11 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
   // ── show hint toast when tool changes ────────────────────────────────────────
   useEffect(() => {
     const hints: Partial<Record<Tool, string>> = {
-      draw: "צייר על גבי התמונה",
-      rect: "לחצו על התמונה כדי להוסיף מלבן",
-      ellipse: "לחצו על התמונה כדי להוסיף עיגול",
-      line: "לחצו על התמונה כדי להוסיף קו",
-      crop: "גרור על התמונה כדי לבחור אזור לחיתוך",
+      draw:    t.hintDraw,
+      rect:    t.hintRect,
+      ellipse: t.hintEllipse,
+      line:    t.hintLine,
+      crop:    t.hintCrop,
     };
     const msg = hints[tool];
     if (msg) showHint(msg);
@@ -549,7 +548,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
       form.append("originalUrl", imageUrl);
       const res = await fetch("/api/save", { method: "POST", body: form });
       const json = (await res.json()) as { url?: string; error?: string };
-      if (!res.ok || !json.url) throw new Error(json.error ?? "שגיאה בשמירה");
+      if (!res.ok || !json.url) throw new Error(json.error ?? t.saveError);
       setSavedUrl(json.url);
       window.parent.postMessage({ type: "image-editor-save", url: json.url, quoteId, originalUrl: imageUrl }, "*");
     } catch (e) {
@@ -568,15 +567,15 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
   const showFontSize = tool === "text" || selectedObjectType === "i-text";
 
   return (
-    <div ref={containerRef} style={{ height: "100vh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div ref={containerRef} dir={t.dir} style={{ height: "100vh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
 
       {/* ── Toolbar: Save is static, rest scrolls on mobile ── */}
       <div
-        className="bg-gray-800 shadow-md flex-shrink-0 flex items-center"
+        className={`${design.toolbar} flex-shrink-0 flex items-center`}
         style={{ height: 56 }}
       >
         {/* Save button — always visible, never scrolls */}
-        <div className="flex items-center gap-1.5 pl-3 flex-shrink-0">
+        <div className="flex items-center gap-1.5 px-3 flex-shrink-0">
           <button
             onClick={handleSave}
             disabled={saving || !canvasReady}
@@ -586,9 +585,9 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
                 : "bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
             }`}
           >
-            {saving ? "שומר..." : savedUrl ? "✓ נשמר" : "💾 שמור"}
+            {saving ? t.saving : savedUrl ? t.saved : t.save}
           </button>
-          <div className="w-px h-8 bg-gray-600" />
+          <div className={design.divider} />
         </div>
 
         {/* Scrollable area for all other controls */}
@@ -596,12 +595,12 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
         <div className="flex items-center gap-1.5 px-2 h-full" style={{ minWidth: "max-content" }}>
 
         {/* Undo / Redo / Clear all */}
-        <button onClick={undo} title="בטל (Ctrl+Z)" className="px-2 py-1.5 rounded text-base bg-gray-700 text-gray-200 hover:bg-gray-600 border border-gray-600">↩</button>
-        <button onClick={redo} title="שחזר (Ctrl+Y)" className="px-2 py-1.5 rounded text-base bg-gray-700 text-gray-200 hover:bg-gray-600 border border-gray-600">↪</button>
-        <button onClick={clearAll} title="נקה הכל" className="px-2 py-1.5 rounded text-base bg-red-800 text-white hover:bg-red-700 border border-red-700">🗑</button>
+        <button onClick={undo} title={t.undoTitle} className={design.iconBtn}>↩</button>
+        <button onClick={redo} title={t.redoTitle} className={design.iconBtn}>↪</button>
+        <button onClick={clearAll} title={t.clearTitle} className={design.clearBtn}>🗑</button>
         {/* Edit text button — appears when text is selected, lets mobile users enter editing mode */}
         {selectedObjectType === "i-text" && (
-          <button onClick={handleEditText} title="ערוך טקסט" className="px-2 py-1.5 rounded text-base bg-blue-700 text-white hover:bg-blue-600 border border-blue-600">✏️ ערוך</button>
+          <button onClick={handleEditText} title={t.editTextTitle} className={design.editTextBtn}>{t.editText}</button>
         )}
 
         {/* Spacer */}
@@ -610,17 +609,17 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
         {/* Color + stroke + font size (when relevant) */}
         {showColorStroke && (
           <>
-            <label className="flex flex-col items-center gap-0.5 cursor-pointer" title="צבע">
+            <label className="flex flex-col items-center gap-0.5 cursor-pointer" title={t.colorTitle}>
               <input
                 type="color"
                 value={color}
                 onChange={(e) => setColor(e.target.value)}
                 className="w-7 h-7 rounded border-0 p-0 cursor-pointer"
               />
-              <span className="text-gray-400 text-xs">צבע</span>
+              <span className={design.sliderLabel}>{t.colorLabel}</span>
             </label>
             {showStrokeSlider && (
-              <label className="flex flex-col items-center gap-0.5" title="עובי">
+              <label className="flex flex-col items-center gap-0.5" title={t.strokeTitle}>
                 <input
                   type="range"
                   min={1}
@@ -629,11 +628,11 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
                   onChange={(e) => setStrokeWidth(Number(e.target.value))}
                   className="w-20 accent-blue-400"
                 />
-                <span className="text-gray-400 text-xs">עובי {strokeWidth}</span>
+                <span className={design.sliderLabel}>{t.strokeLabel} {strokeWidth}</span>
               </label>
             )}
             {showFontSize && (
-              <label className="flex flex-col items-center gap-0.5" title="גודל טקסט">
+              <label className="flex flex-col items-center gap-0.5" title={t.fontTitle}>
                 <input
                   type="range"
                   min={10}
@@ -642,31 +641,31 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
                   onChange={(e) => setFontSize(Number(e.target.value))}
                   className="w-20 accent-blue-400"
                 />
-                <span className="text-gray-400 text-xs">גודל {fontSize}</span>
+                <span className={design.sliderLabel}>{t.fontSizeLabel} {fontSize}</span>
               </label>
             )}
-            <div className="w-px h-8 bg-gray-600 mx-0.5" />
+            <div className={`${design.divider} mx-0.5`} />
           </>
         )}
 
-        {/* RIGHT: Tools */}
-        <ToolBtn active={tool === "draw"} onClick={() => setTool("draw")} title="ציור חופשי">
-          <span>✏️</span><span>ציור</span>
+        {/* Tools */}
+        <ToolBtn active={tool === "draw"} onClick={() => setTool("draw")} title={t.draw}>
+          <span>✏️</span><span>{t.draw}</span>
         </ToolBtn>
-        <ToolBtn active={tool === "text"} onClick={handleAddText} title="הוסף טקסט">
-          <span className="font-bold text-sm">T</span><span>טקסט</span>
+        <ToolBtn active={tool === "text"} onClick={handleAddText} title={t.text}>
+          <span className="font-bold text-sm">T</span><span>{t.text}</span>
         </ToolBtn>
-        <ToolBtn active={tool === "rect"} onClick={() => setTool("rect")} title="מלבן">
-          <span>▭</span><span>מלבן</span>
+        <ToolBtn active={tool === "rect"} onClick={() => setTool("rect")} title={t.rect}>
+          <span>▭</span><span>{t.rect}</span>
         </ToolBtn>
-        <ToolBtn active={tool === "ellipse"} onClick={() => setTool("ellipse")} title="עיגול">
-          <span>○</span><span>עיגול</span>
+        <ToolBtn active={tool === "ellipse"} onClick={() => setTool("ellipse")} title={t.ellipse}>
+          <span>○</span><span>{t.ellipse}</span>
         </ToolBtn>
-        <ToolBtn active={tool === "line"} onClick={() => setTool("line")} title="קו">
-          <span>╱</span><span>קו</span>
+        <ToolBtn active={tool === "line"} onClick={() => setTool("line")} title={t.line}>
+          <span>╱</span><span>{t.line}</span>
         </ToolBtn>
-        <ToolBtn active={tool === "crop"} onClick={() => setTool("crop")} title="חיתוך">
-          <span>✂️</span><span>חיתוך</span>
+        <ToolBtn active={tool === "crop"} onClick={() => setTool("crop")} title={t.crop}>
+          <span>✂️</span><span>{t.crop}</span>
         </ToolBtn>
       </div>
       </div>
@@ -716,7 +715,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
                   onClick={applyCrop}
                   className="px-3 py-1.5 rounded text-xs font-semibold bg-blue-500 text-white shadow-lg hover:bg-blue-600 border border-blue-400"
                 >
-                  ✂️ החל חיתוך
+                  {t.applyCrop}
                 </button>
               )}
             </div>
@@ -728,14 +727,14 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
           <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <div className="m-8 p-6 bg-red-50 rounded-lg text-red-700 text-center max-w-md">
               <div className="text-3xl mb-2">⚠️</div>
-              <div className="font-bold mb-1">שגיאה בטעינת התמונה</div>
+              <div className="font-bold mb-1">{t.errorLoading}</div>
               <div className="text-sm text-red-600 break-all">{imageLoadError}</div>
             </div>
           </div>
         )}
         {toolHint && (
           <div
-            dir="rtl"
+            dir={t.dir}
             style={{ position: "absolute", bottom: saveError ? 60 : 16, left: "50%", transform: "translateX(-50%)", zIndex: 50 }}
             className="bg-gray-900 bg-opacity-90 text-white px-4 py-2 rounded-lg text-sm shadow-lg whitespace-nowrap pointer-events-none"
           >
