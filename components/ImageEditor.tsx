@@ -492,26 +492,30 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
   return (
     <div ref={containerRef} style={{ height: "100vh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
 
-      {/* ── Toolbar: horizontally scrollable on mobile ── */}
+      {/* ── Toolbar: Save is static, rest scrolls on mobile ── */}
       <div
-        className="bg-gray-800 shadow-md flex-shrink-0"
-        style={{ height: 56, overflowX: "auto", overflowY: "hidden" }}
+        className="bg-gray-800 shadow-md flex-shrink-0 flex items-center"
+        style={{ height: 56 }}
       >
-      <div className="flex items-center gap-1.5 px-3 h-full" style={{ minWidth: "max-content" }}>
-        {/* LEFT: Save */}
-        <button
-          onClick={handleSave}
-          disabled={saving || !canvasReady}
-          className={`px-4 py-1.5 rounded text-sm font-semibold transition-colors ${
-            savedUrl
-              ? "bg-green-600 text-white"
-              : "bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-          }`}
-        >
-          {saving ? "שומר..." : savedUrl ? "✓ נשמר" : "💾 שמור"}
-        </button>
+        {/* Save button — always visible, never scrolls */}
+        <div className="flex items-center gap-1.5 pl-3 flex-shrink-0">
+          <button
+            onClick={handleSave}
+            disabled={saving || !canvasReady}
+            className={`px-4 py-1.5 rounded text-sm font-semibold transition-colors ${
+              savedUrl
+                ? "bg-green-600 text-white"
+                : "bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            }`}
+          >
+            {saving ? "שומר..." : savedUrl ? "✓ נשמר" : "💾 שמור"}
+          </button>
+          <div className="w-px h-8 bg-gray-600" />
+        </div>
 
-        <div className="w-px h-8 bg-gray-600 mx-0.5" />
+        {/* Scrollable area for all other controls */}
+        <div style={{ flex: 1, overflowX: "auto", overflowY: "hidden", height: "100%" }}>
+        <div className="flex items-center gap-1.5 px-2 h-full" style={{ minWidth: "max-content" }}>
 
         {/* Undo / Redo / Clear all */}
         <button onClick={undo} title="בטל (Ctrl+Z)" className="px-2 py-1.5 rounded text-base bg-gray-700 text-gray-200 hover:bg-gray-600 border border-gray-600">↩</button>
@@ -582,6 +586,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
         <ToolBtn active={tool === "crop"} onClick={() => setTool("crop")} title="חיתוך">
           <span>✂️</span><span>חיתוך</span>
         </ToolBtn>
+      </div>
       </div>
       </div>
 
