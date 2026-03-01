@@ -149,8 +149,11 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
       fontSize: 28,
       fill: colorRef.current,
       fontFamily: "Arial",
+      lockUniScaling: true,
     });
     canvas.add(txt);
+    // Show only 4 corner handles — keeps scaling proportional
+    txt.setControlsVisibility({ ml: false, mr: false, mt: false, mb: false });
     canvas.setActiveObject(txt);
     canvas.renderAll();
     saveSnapshot();
@@ -295,10 +298,13 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
           ? (obj as unknown as { fill: string }).fill
           : (obj as unknown as { stroke: string }).stroke;
         if (c && typeof c === "string") setColorRef.current(c);
-        // Sync font size for text
+        // Sync font size for text + enforce 4-corner-only handles
         if (obj.type === "i-text") {
           const fs = (obj as unknown as { fontSize: number }).fontSize;
           if (fs) setFontSizeRef.current(fs);
+          (obj as unknown as { lockUniScaling: boolean }).lockUniScaling = true;
+          (obj as unknown as { setControlsVisibility: (v: Record<string, boolean>) => void })
+            .setControlsVisibility({ ml: false, mr: false, mt: false, mb: false });
         }
       };
 
