@@ -137,9 +137,15 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
     const cw = canvas.width ?? 400;
     const ch = canvas.height ?? 300;
 
+    // On mobile, place text near the top so keyboard doesn't cover it
+    const isMobile = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+    const topPos = isMobile
+      ? Math.max(10, ch * 0.15 + (Math.random() * 20 - 10))
+      : Math.max(10, ch / 2 - 20 + (Math.random() * 60 - 30));
+
     const txt = new IText("טקסט", {
       left: Math.max(10, cw / 2 - 40 + (Math.random() * 60 - 30)),
-      top: Math.max(10, ch / 2 - 20 + (Math.random() * 60 - 30)),
+      top: topPos,
       fontSize: 28,
       fill: colorRef.current,
       fontFamily: "Arial",
@@ -296,13 +302,17 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
         const currentTool = toolRef.current;
         const target = opt.target as (FabricObject & { isEditing?: boolean; enterEditing?: () => void; selectAll?: () => void }) | undefined;
 
-        // Mobile: single tap on text → enter editing and select all text
+        // Mobile text tap: first tap = select (so user can drag), second tap = enter editing
         if (target?.type === "i-text") {
           const isTouch = (opt.e as PointerEvent).pointerType === "touch" || "touches" in opt.e;
           if (isTouch) {
+            const alreadySelected = canvas.getActiveObject() === target;
             canvas.setActiveObject(target);
-            target.enterEditing?.();
-            target.selectAll?.();
+            if (alreadySelected) {
+              // Second tap on already-selected text → enter editing, select all
+              target.enterEditing?.();
+              target.selectAll?.();
+            }
             canvas.renderAll();
             return;
           }
