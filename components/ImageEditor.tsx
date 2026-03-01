@@ -157,6 +157,16 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
     setToolRef.current("select");
   }, [saveSnapshot]);
 
+  // ── edit text (toolbar button — safe way to enter editing on mobile) ────────────
+  const handleEditText = useCallback(() => {
+    const canvas = fabricRef.current;
+    const active = canvas?.getActiveObject() as (FabricObject & { enterEditing?: () => void; selectAll?: () => void }) | null;
+    if (!active || active.type !== "i-text") return;
+    active.enterEditing?.();
+    active.selectAll?.();
+    canvas?.renderAll();
+  }, []);
+
   // ── crop (HTML overlay — avoids Fabric.js insertBefore DOM error) ─────────────
   const handleCropMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -302,17 +312,19 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
         const currentTool = toolRef.current;
         const target = opt.target as (FabricObject & { isEditing?: boolean; enterEditing?: () => void; selectAll?: () => void }) | undefined;
 
-        // Mobile text tap: first tap = select (so user can drag), second tap = enter editing
+        // Mobile text tap: always select only (never auto-enter edit) so user can drag freely
+        // To edit, user taps the ✏️ toolbar button
         if (target?.type === "i-text") {
           const isTouch = (opt.e as PointerEvent).pointerType === "touch" || "touches" in opt.e;
           if (isTouch) {
-            const alreadySelected = canvas.getActiveObject() === target;
             canvas.setActiveObject(target);
-            if (alreadySelected) {
-              // Second tap on already-selected text → enter editing, select all
-              target.enterEditing?.();
-              target.selectAll?.();
-            }
+            // Fabric may have auto-entered edit mode internally — exit it asynchronously
+            setTimeout(() => {
+              if ((target as unknown as { isEditing?: boolean; exitEditing?: () => void }).isEditing) {
+                (target as unknown as { exitEditing: () => void }).exitEditing();
+                canvas.renderAll();
+              }
+            }, 0);
             canvas.renderAll();
             return;
           }
@@ -531,6 +543,10 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
         <button onClick={undo} title="בטל (Ctrl+Z)" className="px-2 py-1.5 rounded text-base bg-gray-700 text-gray-200 hover:bg-gray-600 border border-gray-600">↩</button>
         <button onClick={redo} title="שחזר (Ctrl+Y)" className="px-2 py-1.5 rounded text-base bg-gray-700 text-gray-200 hover:bg-gray-600 border border-gray-600">↪</button>
         <button onClick={clearAll} title="נקה הכל" className="px-2 py-1.5 rounded text-base bg-red-800 text-white hover:bg-red-700 border border-red-700">🗑</button>
+        {/* Edit text button — appears when text is selected, lets mobile users enter editing mode */}
+        {selectedObjectType === "i-text" && (
+          <button onClick={handleEditText} title="ערוך טקסט" className="px-2 py-1.5 rounded text-base bg-blue-700 text-white hover:bg-blue-600 border border-blue-600">✏️ ערוך</button>
+        )}
 
         {/* Spacer */}
         <div className="flex-1" />
