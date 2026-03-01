@@ -567,7 +567,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
   const showFontSize = tool === "text" || selectedObjectType === "i-text";
 
   return (
-    <div ref={containerRef} dir={t.dir} style={{ height: "100vh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div ref={containerRef} style={{ height: "100vh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
 
       {/* ── Toolbar: Save is static, rest scrolls on mobile ── */}
       <div
@@ -575,7 +575,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
         style={{ height: 56 }}
       >
         {/* Save button — always visible, never scrolls */}
-        <div className="flex items-center gap-1.5 px-3 flex-shrink-0">
+        <div className="flex items-center gap-1.5 pl-3 flex-shrink-0">
           <button
             onClick={handleSave}
             disabled={saving || !canvasReady}
