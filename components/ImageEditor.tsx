@@ -55,6 +55,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
   // Undo / redo stacks (JSON snapshots)
   const historyRef = useRef<string[]>([]);
   const redoStackRef = useRef<string[]>([]);
+  const [canRedo, setCanRedo] = useState(false);
 
   // Crop HTML overlay state (avoids Fabric.js DOM manipulation during crop)
   const [cropOverlay, setCropOverlay] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -101,12 +102,14 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
     historyRef.current.push(JSON.stringify(canvas.toJSON()));
     if (historyRef.current.length > 30) historyRef.current.shift();
     redoStackRef.current = []; // new action clears redo
+    setCanRedo(false);
   }, []);
 
   const undo = useCallback(async () => {
     const canvas = fabricRef.current;
     if (!canvas || historyRef.current.length < 2) return;
     redoStackRef.current.push(historyRef.current.pop()!);
+    setCanRedo(true);
     const prev = historyRef.current[historyRef.current.length - 1];
     await canvas.loadFromJSON(JSON.parse(prev));
     canvas.renderAll();
@@ -117,6 +120,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
     if (!canvas || redoStackRef.current.length === 0) return;
     const next = redoStackRef.current.pop()!;
     historyRef.current.push(next);
+    setCanRedo(redoStackRef.current.length > 0);
     await canvas.loadFromJSON(JSON.parse(next));
     canvas.renderAll();
   }, []);
@@ -262,6 +266,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
     setCropBtnPos(null);
     historyRef.current = [];
     redoStackRef.current = [];
+    setCanRedo(false);
     saveSnapshot();
     setTool("select");
   }, [cropOverlay, saveSnapshot]);
@@ -596,7 +601,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
 
         {/* Undo / Redo / Clear all */}
         <button onClick={undo} title={t.undoTitle} className={design.iconBtn}>↩</button>
-        <button onClick={redo} title={t.redoTitle} className={design.iconBtn}>↪</button>
+        <button onClick={redo} title={t.redoTitle} disabled={!canRedo} className={`${design.iconBtn} disabled:opacity-40 disabled:cursor-not-allowed`}>↪</button>
         <button onClick={clearAll} title={t.clearTitle} className={design.clearBtn}>🗑</button>
         {/* Edit text button — appears when text is selected, lets mobile users enter editing mode */}
         {selectedObjectType === "i-text" && (
