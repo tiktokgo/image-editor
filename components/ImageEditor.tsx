@@ -735,14 +735,14 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
         {toolHint && (
           <div
             dir={t.dir}
-            style={{ position: "absolute", bottom: saveError ? 60 : 16, left: "50%", transform: "translateX(-50%)", zIndex: 50 }}
+            style={{ position: "fixed", bottom: saveError ? 72 : 24, left: "50%", transform: "translateX(-50%)", zIndex: 100 }}
             className="bg-gray-900 bg-opacity-90 text-white px-4 py-2 rounded-lg text-sm shadow-lg whitespace-nowrap pointer-events-none"
           >
             {toolHint}
           </div>
         )}
         {saveError && (
-          <div style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", zIndex: 50 }}
+          <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", zIndex: 100 }}
             className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm shadow-lg whitespace-nowrap"
           >
             ⚠️ {saveError}
