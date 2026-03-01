@@ -427,7 +427,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
       const res = await fetch("/api/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dataUrl }),
+        body: JSON.stringify({ dataUrl, quoteId, originalUrl: imageUrl }),
       });
       const json = (await res.json()) as { url?: string; error?: string };
       if (!res.ok || !json.url) throw new Error(json.error ?? "שגיאה בשמירה");

@@ -3,13 +3,13 @@ import { put } from "@vercel/blob";
 
 /**
  * POST /api/save
- * Body: { dataUrl: string }  — a PNG data URL from canvas.toDataURL()
- * Uploads to Vercel Blob and returns { url: string }
+ * Body: { dataUrl: string, quoteId?: string, originalUrl?: string }
+ * Uploads to Vercel Blob, calls Bubble callback API, returns { url: string }
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as { dataUrl?: string };
-    const { dataUrl } = body;
+    const body = await req.json() as { dataUrl?: string; quoteId?: string; originalUrl?: string };
+    const { dataUrl, quoteId, originalUrl } = body;
 
     if (!dataUrl || !dataUrl.startsWith("data:image/")) {
       return NextResponse.json({ error: "Invalid dataUrl" }, { status: 400 });
@@ -23,6 +23,20 @@ export async function POST(req: NextRequest) {
       access: "public",
       contentType: "image/png",
     });
+
+    // Call Bubble API callback if configured
+    const callbackUrl = process.env.BUBBLE_CALLBACK_URL;
+    if (callbackUrl && quoteId) {
+      await fetch(callbackUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          new_url: blob.url,
+          old_url: originalUrl ?? "",
+          quote_id: quoteId,
+        }),
+      });
+    }
 
     return NextResponse.json({ url: blob.url });
   } catch (err) {
