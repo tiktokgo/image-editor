@@ -190,6 +190,8 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
     if (tool !== "crop" || !el) return;
 
     const onPointerDown = (e: PointerEvent) => {
+      // If the tap landed on the apply-crop button, don't start a new drag
+      if ((e.target as HTMLElement).closest("button")) return;
       e.preventDefault();
       el.setPointerCapture(e.pointerId);
       const rect = el.getBoundingClientRect();
