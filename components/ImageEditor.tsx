@@ -294,7 +294,19 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
       canvas.on("mouse:down", (opt) => {
         const pointer = canvas.getScenePoint(opt.e);
         const currentTool = toolRef.current;
-        const target = opt.target as (FabricObject & { isEditing?: boolean; enterEditing?: () => void }) | undefined;
+        const target = opt.target as (FabricObject & { isEditing?: boolean; enterEditing?: () => void; selectAll?: () => void }) | undefined;
+
+        // Mobile: single tap on text → enter editing and select all text
+        if (target?.type === "i-text") {
+          const isTouch = (opt.e as PointerEvent).pointerType === "touch" || "touches" in opt.e;
+          if (isTouch) {
+            canvas.setActiveObject(target);
+            target.enterEditing?.();
+            target.selectAll?.();
+            canvas.renderAll();
+            return;
+          }
+        }
 
         if (currentTool === "select" || currentTool === "draw" || currentTool === "crop") return;
 
@@ -480,11 +492,12 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
   return (
     <div ref={containerRef} style={{ height: "100vh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
 
-      {/* ── Toolbar: actions on LEFT, tools on RIGHT ── */}
+      {/* ── Toolbar: horizontally scrollable on mobile ── */}
       <div
-        className="flex items-center gap-1.5 px-3 bg-gray-800 shadow-md flex-shrink-0"
-        style={{ height: 56 }}
+        className="bg-gray-800 shadow-md flex-shrink-0"
+        style={{ height: 56, overflowX: "auto", overflowY: "hidden" }}
       >
+      <div className="flex items-center gap-1.5 px-3 h-full" style={{ minWidth: "max-content" }}>
         {/* LEFT: Save */}
         <button
           onClick={handleSave}
@@ -569,6 +582,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
         <ToolBtn active={tool === "crop"} onClick={() => setTool("crop")} title="חיתוך">
           <span>✂️</span><span>חיתוך</span>
         </ToolBtn>
+      </div>
       </div>
 
       {/* ── Canvas area: gray background, canvas centered inside ── */}
