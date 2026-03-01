@@ -12,9 +12,14 @@ export const t = {
   dir: dir,
 
   // Save button
-  save:   isHe ? "💾 שמור"   : "💾 Save",
-  saving: isHe ? "שומר..."   : "Saving...",
-  saved:  isHe ? "✓ נשמר"   : "✓ Saved",
+  save:        isHe ? "💾 שמור"   : "💾 Save",
+  saving:      isHe ? "שומר..."   : "Saving...",
+  saved:       isHe ? "✓ נשמר"   : "✓ Saved",
+  saveLast:    !isHe,               // English: save button on the right
+  savePadding: isHe ? "pl-3" : "pr-3",
+
+  // Text object default placeholder
+  textPlaceholder: isHe ? "טקסט" : "Text",
 
   // Toolbar tool labels
   draw:    isHe ? "ציור"    : "Draw",

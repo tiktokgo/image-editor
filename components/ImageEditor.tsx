@@ -152,7 +152,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
       ? Math.max(10, ch * 0.15 + (Math.random() * 20 - 10))
       : Math.max(10, ch / 2 - 20 + (Math.random() * 60 - 30));
 
-    const txt = new IText("טקסט", {
+    const txt = new IText(t.textPlaceholder, {
       left: Math.max(10, cw / 2 - 40 + (Math.random() * 60 - 30)),
       top: topPos,
       fontSize: 28,
@@ -574,21 +574,21 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
         className={`${design.toolbar} flex-shrink-0 flex items-center`}
         style={{ height: 56 }}
       >
-        {/* Save button — always visible, never scrolls */}
-        <div className="flex items-center gap-1.5 pl-3 flex-shrink-0">
-          <button
-            onClick={handleSave}
-            disabled={saving || !canvasReady}
-            className={`px-4 py-1.5 rounded text-sm font-semibold transition-colors ${
-              savedUrl
-                ? "bg-green-600 text-white"
-                : "bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
-            }`}
-          >
-            {saving ? t.saving : savedUrl ? t.saved : t.save}
-          </button>
-          <div className={design.divider} />
-        </div>
+        {/* Save button — left side (Hebrew) */}
+        {!t.saveLast && (
+          <div className={`flex items-center gap-1.5 ${t.savePadding} flex-shrink-0`}>
+            <button
+              onClick={handleSave}
+              disabled={saving || !canvasReady}
+              className={`px-4 py-1.5 rounded text-sm font-semibold transition-colors ${
+                savedUrl ? "bg-green-600 text-white" : "bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              }`}
+            >
+              {saving ? t.saving : savedUrl ? t.saved : t.save}
+            </button>
+            <div className={design.divider} />
+          </div>
+        )}
 
         {/* Scrollable area for all other controls */}
         <div style={{ flex: 1, overflowX: "auto", overflowY: "hidden", height: "100%" }}>
@@ -669,6 +669,22 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
         </ToolBtn>
       </div>
       </div>
+
+        {/* Save button — right side (English) */}
+        {t.saveLast && (
+          <div className={`flex items-center gap-1.5 ${t.savePadding} flex-shrink-0`}>
+            <div className={design.divider} />
+            <button
+              onClick={handleSave}
+              disabled={saving || !canvasReady}
+              className={`px-4 py-1.5 rounded text-sm font-semibold transition-colors ${
+                savedUrl ? "bg-green-600 text-white" : "bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              }`}
+            >
+              {saving ? t.saving : savedUrl ? t.saved : t.save}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ── Canvas area: gray background, canvas centered inside ── */}
