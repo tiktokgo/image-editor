@@ -539,12 +539,15 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
     setSaveError(null);
     setSavedUrl(null);
     try {
-      const dataUrl = canvas.toDataURL({ format: "png", multiplier: multiplierRef.current });
-      const res = await fetch("/api/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dataUrl, quoteId, originalUrl: imageUrl }),
-      });
+      // Export as JPEG (much smaller than PNG) then send as FormData binary
+      // to avoid base64 overhead and stay within Vercel's 4.5 MB payload limit.
+      const dataUrl = canvas.toDataURL({ format: "jpeg", quality: 0.92, multiplier: multiplierRef.current });
+      const blob = await fetch(dataUrl).then((r) => r.blob());
+      const form = new FormData();
+      form.append("file", blob, "edited.jpg");
+      if (quoteId) form.append("quoteId", quoteId);
+      form.append("originalUrl", imageUrl);
+      const res = await fetch("/api/save", { method: "POST", body: form });
       const json = (await res.json()) as { url?: string; error?: string };
       if (!res.ok || !json.url) throw new Error(json.error ?? "שגיאה בשמירה");
       setSavedUrl(json.url);

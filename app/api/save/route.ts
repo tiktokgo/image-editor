@@ -3,25 +3,27 @@ import { put } from "@vercel/blob";
 
 /**
  * POST /api/save
- * Body: { dataUrl: string, quoteId?: string, originalUrl?: string }
+ * Body: FormData { file: File, quoteId?: string, originalUrl?: string }
  * Uploads to Vercel Blob, calls Bubble callback API, returns { url: string }
  */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json() as { dataUrl?: string; quoteId?: string; originalUrl?: string };
-    const { dataUrl, quoteId, originalUrl } = body;
+    const form = await req.formData();
+    const file = form.get("file") as File | null;
+    const quoteId = form.get("quoteId") as string | null;
+    const originalUrl = form.get("originalUrl") as string | null;
 
-    if (!dataUrl || !dataUrl.startsWith("data:image/")) {
-      return NextResponse.json({ error: "Invalid dataUrl" }, { status: 400 });
+    if (!file) {
+      return NextResponse.json({ error: "Missing file" }, { status: 400 });
     }
 
-    // Strip the "data:image/png;base64," prefix
-    const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, "");
-    const buffer = Buffer.from(base64, "base64");
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const ext = file.type === "image/jpeg" ? "jpg" : "png";
+    const contentType = file.type || "image/jpeg";
 
-    const blob = await put(`edited/${Date.now()}.png`, buffer, {
+    const blob = await put(`edited/${Date.now()}.${ext}`, buffer, {
       access: "public",
-      contentType: "image/png",
+      contentType,
     });
 
     // Call Bubble API callback if configured
