@@ -62,6 +62,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
   const [cropBtnPos, setCropBtnPos] = useState<{ x: number; y: number } | null>(null);
   const cropStartRef = useRef<{ x: number; y: number } | null>(null);
   const cropDraggingRef = useRef(false);
+  const cropOverlayRef = useRef<HTMLDivElement | null>(null);
 
   const [tool, setTool] = useState<Tool>("select");
   const [color, setColor] = useState("#e53e3e");
@@ -75,6 +76,9 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
   const [imageLoadError, setImageLoadError] = useState<string | null>(null);
   // Canvas display size (matches rendered image, not full viewport)
   const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
+  // Tool hint toast
+  const [toolHint, setToolHint] = useState<string | null>(null);
+  const toolHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Multiplier for toDataURL so saved PNG = original image resolution (1 / renderScale)
   const multiplierRef = useRef(1);
 
@@ -128,6 +132,12 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
     saveSnapshot();
   }, [saveSnapshot]);
 
+  const showHint = useCallback((msg: string) => {
+    if (toolHintTimerRef.current) clearTimeout(toolHintTimerRef.current);
+    setToolHint(msg);
+    toolHintTimerRef.current = setTimeout(() => setToolHint(null), 3500);
+  }, []);
+
   // ── add text via toolbar button ───────────────────────────────────────────────
   const handleAddText = useCallback(() => {
     const canvas = fabricRef.current;
@@ -157,8 +167,9 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
     canvas.setActiveObject(txt);
     canvas.renderAll();
     saveSnapshot();
+    showHint("הטקסט נוסף לתמונה - גרור אותו ושנה בהתאם");
     setToolRef.current("select");
-  }, [saveSnapshot]);
+  }, [saveSnapshot, showHint]);
 
   // ── edit text (toolbar button — safe way to enter editing on mobile) ────────────
   const handleEditText = useCallback(() => {
@@ -170,42 +181,63 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
     canvas?.renderAll();
   }, []);
 
-  // ── crop (HTML overlay — avoids Fabric.js insertBefore DOM error) ─────────────
-  const handleCropMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    cropStartRef.current = { x, y };
-    cropDraggingRef.current = true;
-    setCropOverlay({ x, y, w: 0, h: 0 });
-    setCropBtnPos(null);
-  }, []);
+  // ── crop: all pointer handling is in the useEffect below (covers mouse + touch) ──
 
-  const handleCropMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (!cropDraggingRef.current || !cropStartRef.current) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const s = cropStartRef.current;
-    setCropOverlay({
-      x: Math.min(x, s.x),
-      y: Math.min(y, s.y),
-      w: Math.abs(x - s.x),
-      h: Math.abs(y - s.y),
-    });
-  }, []);
+  // Pointer-event listeners on the crop overlay — covers both mouse and touch.
+  // Using setPointerCapture so drag continues even if finger slides off the element.
+  useEffect(() => {
+    const el = cropOverlayRef.current;
+    if (tool !== "crop" || !el) return;
 
-  const handleCropMouseUp = useCallback(() => {
-    if (!cropDraggingRef.current) return;
-    cropDraggingRef.current = false;
-    setCropOverlay((prev) => {
-      if (prev && prev.w > 10 && prev.h > 10) {
-        setCropBtnPos({ x: prev.x + prev.w, y: prev.y + prev.h });
-        return prev;
-      }
-      return null;
-    });
-  }, []);
+    const onPointerDown = (e: PointerEvent) => {
+      e.preventDefault();
+      el.setPointerCapture(e.pointerId);
+      const rect = el.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      cropStartRef.current = { x, y };
+      cropDraggingRef.current = true;
+      setCropOverlay({ x, y, w: 0, h: 0 });
+      setCropBtnPos(null);
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (!cropDraggingRef.current || !cropStartRef.current) return;
+      const rect = el.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const s = cropStartRef.current;
+      setCropOverlay({
+        x: Math.min(x, s.x),
+        y: Math.min(y, s.y),
+        w: Math.abs(x - s.x),
+        h: Math.abs(y - s.y),
+      });
+    };
+
+    const onPointerUp = () => {
+      if (!cropDraggingRef.current) return;
+      cropDraggingRef.current = false;
+      setCropOverlay((prev) => {
+        if (prev && prev.w > 10 && prev.h > 10) {
+          setCropBtnPos({ x: prev.x + prev.w, y: prev.y });
+          return prev;
+        }
+        return null;
+      });
+    };
+
+    el.addEventListener("pointerdown", onPointerDown);
+    el.addEventListener("pointermove", onPointerMove);
+    el.addEventListener("pointerup", onPointerUp);
+    el.addEventListener("pointercancel", onPointerUp);
+    return () => {
+      el.removeEventListener("pointerdown", onPointerDown);
+      el.removeEventListener("pointermove", onPointerMove);
+      el.removeEventListener("pointerup", onPointerUp);
+      el.removeEventListener("pointercancel", onPointerUp);
+    };
+  }, [tool]);
 
   const applyCrop = useCallback(async () => {
     const canvas = fabricRef.current;
@@ -438,6 +470,19 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
     };
   }, [imageUrl, saveSnapshot, clearAll, undo, redo]);
 
+  // ── show hint toast when tool changes ────────────────────────────────────────
+  useEffect(() => {
+    const hints: Partial<Record<Tool, string>> = {
+      draw: "צייר על גבי התמונה",
+      rect: "לחצו על התמונה כדי להוסיף מלבן",
+      ellipse: "לחצו על התמונה כדי להוסיף עיגול",
+      line: "לחצו על התמונה כדי להוסיף קו",
+      crop: "גרור על התמונה כדי לבחור אזור לחיתוך",
+    };
+    const msg = hints[tool];
+    if (msg) showHint(msg);
+  }, [tool, showHint]);
+
   // ── sync tool → canvas mode ──────────────────────────────────────────────────
   useEffect(() => {
     const canvas = fabricRef.current;
@@ -641,11 +686,8 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
           {/* ── Crop overlay ── */}
           {tool === "crop" && (
             <div
-              style={{ position: "absolute", inset: 0, cursor: "crosshair", zIndex: 10 }}
-              onMouseDown={handleCropMouseDown}
-              onMouseMove={handleCropMouseMove}
-              onMouseUp={handleCropMouseUp}
-              onMouseLeave={handleCropMouseUp}
+              ref={cropOverlayRef}
+              style={{ position: "absolute", inset: 0, cursor: "crosshair", zIndex: 10, touchAction: "none" }}
             >
               {cropOverlay && cropOverlay.w > 2 && cropOverlay.h > 2 && (
                 <div
@@ -665,6 +707,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
                 <button
                   style={{ position: "absolute", left: cropBtnPos.x + 6, top: cropBtnPos.y + 6, zIndex: 20 }}
                   onMouseDown={(e) => e.stopPropagation()}
+                  onTouchStart={(e) => e.stopPropagation()}
                   onClick={applyCrop}
                   className="px-3 py-1.5 rounded text-xs font-semibold bg-blue-500 text-white shadow-lg hover:bg-blue-600 border border-blue-400"
                 >
@@ -683,6 +726,15 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
               <div className="font-bold mb-1">שגיאה בטעינת התמונה</div>
               <div className="text-sm text-red-600 break-all">{imageLoadError}</div>
             </div>
+          </div>
+        )}
+        {toolHint && (
+          <div
+            dir="rtl"
+            style={{ position: "absolute", bottom: saveError ? 60 : 16, left: "50%", transform: "translateX(-50%)", zIndex: 50 }}
+            className="bg-gray-900 bg-opacity-90 text-white px-4 py-2 rounded-lg text-sm shadow-lg whitespace-nowrap pointer-events-none"
+          >
+            {toolHint}
           </div>
         )}
         {saveError && (
