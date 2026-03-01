@@ -5,7 +5,6 @@ import type {
   Canvas as FabricCanvas,
   FabricObject,
   Line as FabricLine,
-  Rect as FabricRect,
 } from "fabric";
 
 type Tool = "select" | "draw" | "text" | "rect" | "ellipse" | "line" | "crop";
@@ -14,7 +13,6 @@ interface Props {
   imageUrl: string;
 }
 
-// ─── tiny button helper ───────────────────────────────────────────────────────
 function ToolBtn({
   active,
   onClick,
@@ -32,8 +30,8 @@ function ToolBtn({
       title={title}
       className={`flex flex-col items-center justify-center gap-0.5 px-2 py-1.5 rounded text-xs font-medium transition-colors select-none ${
         active
-          ? "bg-blue-600 text-white shadow-inner"
-          : "bg-white text-gray-700 hover:bg-gray-100 border border-gray-200"
+          ? "bg-blue-500 text-white shadow-inner"
+          : "bg-gray-700 text-gray-200 hover:bg-gray-600 border border-gray-600"
       }`}
       style={{ minWidth: 44 }}
     >
@@ -42,23 +40,27 @@ function ToolBtn({
   );
 }
 
-// ─── main component ───────────────────────────────────────────────────────────
 export default function ImageEditor({ imageUrl }: Props) {
   const canvasElRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fabricRef = useRef<FabricCanvas | null>(null);
 
-  // Line drawing state
+  // Ref to IText class (populated after dynamic import)
+  const ITextClassRef = useRef<typeof import("fabric")["IText"] | null>(null);
+
+  // Line drawing
   const isDrawingLineRef = useRef(false);
   const activeLineRef = useRef<FabricLine | null>(null);
 
-  // Crop state
-  const isCropDrawingRef = useRef(false);
-  const cropStartRef = useRef<{ x: number; y: number } | null>(null);
-  const cropRectRef = useRef<FabricRect | null>(null);
-
-  // Undo snapshots (JSON strings)
+  // Undo / redo stacks (JSON snapshots)
   const historyRef = useRef<string[]>([]);
+  const redoStackRef = useRef<string[]>([]);
+
+  // Crop HTML overlay state (avoids Fabric.js DOM manipulation during crop)
+  const [cropOverlay, setCropOverlay] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [cropBtnPos, setCropBtnPos] = useState<{ x: number; y: number } | null>(null);
+  const cropStartRef = useRef<{ x: number; y: number } | null>(null);
+  const cropDraggingRef = useRef(false);
 
   const [tool, setTool] = useState<Tool>("select");
   const [color, setColor] = useState("#e53e3e");
@@ -68,37 +70,45 @@ export default function ImageEditor({ imageUrl }: Props) {
   const [savedUrl, setSavedUrl] = useState<string | null>(null);
   const [canvasReady, setCanvasReady] = useState(false);
   const [imageLoadError, setImageLoadError] = useState<string | null>(null);
+  // Canvas display size (matches rendered image, not full viewport)
+  const [canvasSize, setCanvasSize] = useState({ w: 0, h: 0 });
+  // Multiplier for toDataURL so saved PNG = original image resolution (1 / renderScale)
+  const multiplierRef = useRef(1);
 
-  // ── keep a ref of current tool so event handlers don't stale-close ──────────
+  // Stable refs so Fabric event handlers always read current values
   const toolRef = useRef<Tool>("select");
-  useEffect(() => {
-    toolRef.current = tool;
-  }, [tool]);
+  useEffect(() => { toolRef.current = tool; }, [tool]);
   const colorRef = useRef(color);
-  useEffect(() => {
-    colorRef.current = color;
-  }, [color]);
+  useEffect(() => { colorRef.current = color; }, [color]);
   const strokeWidthRef = useRef(strokeWidth);
-  useEffect(() => {
-    strokeWidthRef.current = strokeWidth;
-  }, [strokeWidth]);
+  useEffect(() => { strokeWidthRef.current = strokeWidth; }, [strokeWidth]);
+  const setToolRef = useRef(setTool);
+  useEffect(() => { setToolRef.current = setTool; }, []);
 
-  // ── snapshot for undo ────────────────────────────────────────────────────────
+  // ── history ──────────────────────────────────────────────────────────────────
   const saveSnapshot = useCallback(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
     historyRef.current.push(JSON.stringify(canvas.toJSON()));
-    // keep at most 30 snapshots
     if (historyRef.current.length > 30) historyRef.current.shift();
+    redoStackRef.current = []; // new action clears redo
   }, []);
 
-  // ── undo ─────────────────────────────────────────────────────────────────────
   const undo = useCallback(async () => {
     const canvas = fabricRef.current;
     if (!canvas || historyRef.current.length < 2) return;
-    historyRef.current.pop(); // discard current
+    redoStackRef.current.push(historyRef.current.pop()!);
     const prev = historyRef.current[historyRef.current.length - 1];
     await canvas.loadFromJSON(JSON.parse(prev));
+    canvas.renderAll();
+  }, []);
+
+  const redo = useCallback(async () => {
+    const canvas = fabricRef.current;
+    if (!canvas || redoStackRef.current.length === 0) return;
+    const next = redoStackRef.current.pop()!;
+    historyRef.current.push(next);
+    await canvas.loadFromJSON(JSON.parse(next));
     canvas.renderAll();
   }, []);
 
@@ -114,35 +124,81 @@ export default function ImageEditor({ imageUrl }: Props) {
     saveSnapshot();
   }, [saveSnapshot]);
 
-  // ── apply crop ───────────────────────────────────────────────────────────────
+  // ── add text via toolbar button ───────────────────────────────────────────────
+  // Text is placed on the canvas and immediately selected (draggable).
+  // Double-click on the text to edit its content.
+  const handleAddText = useCallback(() => {
+    const canvas = fabricRef.current;
+    const IText = ITextClassRef.current;
+    if (!canvas || !IText) return;
+
+    const cw = canvas.width ?? 400;
+    const ch = canvas.height ?? 300;
+
+    const txt = new IText("טקסט", {
+      left: Math.max(10, cw / 2 - 40 + (Math.random() * 60 - 30)),
+      top: Math.max(10, ch / 2 - 20 + (Math.random() * 60 - 30)),
+      fontSize: 28,
+      fill: colorRef.current,
+      fontFamily: "Arial",
+    });
+    canvas.add(txt);
+    canvas.setActiveObject(txt);
+    canvas.renderAll();
+    saveSnapshot();
+    // Switch to select so the user can immediately drag/resize
+    setToolRef.current("select");
+  }, [saveSnapshot]);
+
+  // ── crop (HTML overlay — avoids Fabric.js insertBefore DOM error) ─────────────
+  const handleCropMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    cropStartRef.current = { x, y };
+    cropDraggingRef.current = true;
+    setCropOverlay({ x, y, w: 0, h: 0 });
+    setCropBtnPos(null);
+  }, []);
+
+  const handleCropMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!cropDraggingRef.current || !cropStartRef.current) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const s = cropStartRef.current;
+    setCropOverlay({
+      x: Math.min(x, s.x),
+      y: Math.min(y, s.y),
+      w: Math.abs(x - s.x),
+      h: Math.abs(y - s.y),
+    });
+  }, []);
+
+  const handleCropMouseUp = useCallback(() => {
+    if (!cropDraggingRef.current) return;
+    cropDraggingRef.current = false;
+    setCropOverlay((prev) => {
+      if (prev && prev.w > 10 && prev.h > 10) {
+        setCropBtnPos({ x: prev.x + prev.w, y: prev.y + prev.h });
+        return prev;
+      }
+      return null;
+    });
+  }, []);
+
   const applyCrop = useCallback(async () => {
     const canvas = fabricRef.current;
-    const cropRect = cropRectRef.current;
-    if (!canvas || !cropRect) return;
+    if (!canvas || !cropOverlay) return;
+    const { x, y, w, h } = cropOverlay;
+    if (w < 10 || h < 10) return;
 
-    const left = cropRect.left ?? 0;
-    const top = cropRect.top ?? 0;
-    const width = (cropRect.width ?? 0) * (cropRect.scaleX ?? 1);
-    const height = (cropRect.height ?? 0) * (cropRect.scaleY ?? 1);
+    // Export the selected region at original resolution
+    const croppedData = canvas.toDataURL({ format: "png", left: x, top: y, width: w, height: h, multiplier: multiplierRef.current });
 
-    if (width < 10 || height < 10) return;
-
-    // Export the cropped region
-    const croppedData = canvas.toDataURL({
-      format: "png",
-      left,
-      top,
-      width,
-      height,
-      multiplier: 1,
-    });
-
-    // Remove the crop rect
-    canvas.remove(cropRect);
-    cropRectRef.current = null;
-
-    // Resize canvas, clear objects, reload cropped image as background
-    canvas.setDimensions({ width, height });
+    // Resize canvas to the cropped region (multiplierRef stays the same — same pixel:original ratio)
+    canvas.setDimensions({ width: w, height: h });
+    setCanvasSize({ w, h });
     canvas.getObjects().forEach((o) => canvas.remove(o));
 
     const { FabricImage } = await import("fabric");
@@ -151,12 +207,15 @@ export default function ImageEditor({ imageUrl }: Props) {
     canvas.backgroundImage = img;
     canvas.renderAll();
 
+    setCropOverlay(null);
+    setCropBtnPos(null);
     historyRef.current = [];
+    redoStackRef.current = [];
     saveSnapshot();
     setTool("select");
-  }, [saveSnapshot]);
+  }, [cropOverlay, saveSnapshot]);
 
-  // ── canvas initialisation (runs once) ────────────────────────────────────────
+  // ── canvas initialisation ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!canvasElRef.current || !containerRef.current) return;
     let mounted = true;
@@ -165,73 +224,78 @@ export default function ImageEditor({ imageUrl }: Props) {
       const { Canvas, FabricImage, PencilBrush, Line, Rect, Ellipse, IText } =
         await import("fabric");
 
-      if (!mounted || !canvasElRef.current || !containerRef.current) return;
+      if (!mounted || !canvasElRef.current) return;
+
+      // Store IText class for toolbar button
+      ITextClassRef.current = IText;
 
       const TOOLBAR_H = 56;
-      const w = containerRef.current.clientWidth || window.innerWidth;
-      const h = (containerRef.current.clientHeight || window.innerHeight) - TOOLBAR_H;
+      const maxW = window.innerWidth;
+      const maxH = window.innerHeight - TOOLBAR_H;
 
+      // Start with a temporary canvas; we resize it once we know the image dimensions
       const canvas = new Canvas(canvasElRef.current, {
-        width: w,
-        height: h,
+        width: maxW,
+        height: maxH,
         selection: true,
         backgroundColor: "#ffffff",
       });
       fabricRef.current = canvas;
 
-      // Free-draw brush
       canvas.freeDrawingBrush = new PencilBrush(canvas);
       canvas.freeDrawingBrush.color = colorRef.current;
       canvas.freeDrawingBrush.width = strokeWidthRef.current;
 
-      // Load background image via proxy
+      // Load background image via same-origin proxy (avoids CORS canvas taint)
       const proxyUrl = `/api/image?url=${encodeURIComponent(imageUrl)}`;
       try {
         const img = await FabricImage.fromURL(proxyUrl, { crossOrigin: "anonymous" });
         if (!mounted) return;
 
-        // Scale to fit canvas while keeping aspect ratio
-        const scaleX = w / (img.width ?? w);
-        const scaleY = h / (img.height ?? h);
-        const scale = Math.min(scaleX, scaleY);
-        img.set({
-          left: 0,
-          top: 0,
-          scaleX: scale,
-          scaleY: scale,
-          selectable: false,
-          evented: false,
-          originX: "left",
-          originY: "top",
-        });
+        const imgW = img.width ?? maxW;
+        const imgH = img.height ?? maxH;
+
+        // Scale to fit inside the viewport without upscaling
+        const scale = Math.min(1, maxW / imgW, maxH / imgH);
+        const canvasW = Math.round(imgW * scale);
+        const canvasH = Math.round(imgH * scale);
+
+        // Resize canvas to exactly match the rendered image
+        canvas.setDimensions({ width: canvasW, height: canvasH });
+
+        // Store multiplier: when saving, upscale back to original resolution
+        multiplierRef.current = imgW / canvasW; // = 1 / scale
+
+        img.set({ left: 0, top: 0, scaleX: scale, scaleY: scale, selectable: false, evented: false });
         canvas.backgroundImage = img;
         canvas.renderAll();
         saveSnapshot();
-        if (mounted) setCanvasReady(true);
+        if (mounted) {
+          setCanvasSize({ w: canvasW, h: canvasH });
+          setCanvasReady(true);
+        }
       } catch (e) {
         if (mounted) setImageLoadError(String(e));
       }
 
-      // ── mouse events ────────────────────────────────────────────────────────
+      // ── mouse:down ───────────────────────────────────────────────────────────
       canvas.on("mouse:down", (opt) => {
         const pointer = canvas.getScenePoint(opt.e);
         const currentTool = toolRef.current;
+        const target = opt.target as (FabricObject & { isEditing?: boolean; enterEditing?: () => void }) | undefined;
 
-        if (currentTool === "text") {
-          const txt = new IText("טקסט", {
-            left: pointer.x,
-            top: pointer.y,
-            fontSize: 24,
-            fill: colorRef.current,
-            fontFamily: "Arial",
-            editable: true,
-          });
-          canvas.add(txt);
-          canvas.setActiveObject(txt);
-          txt.enterEditing();
-          txt.selectAll();
+        // In select mode, Fabric.js handles selection natively — nothing to do
+        if (currentTool === "select" || currentTool === "draw" || currentTool === "crop") return;
+
+        // Clicking an existing (non-background) object → select it, don't create new
+        if (target) {
+          canvas.setActiveObject(target);
           canvas.renderAll();
-        } else if (currentTool === "rect") {
+          return;
+        }
+
+        // Click on empty canvas — create new element
+        if (currentTool === "rect") {
           const rect = new Rect({
             left: pointer.x - 60,
             top: pointer.y - 30,
@@ -240,11 +304,14 @@ export default function ImageEditor({ imageUrl }: Props) {
             fill: "transparent",
             stroke: colorRef.current,
             strokeWidth: strokeWidthRef.current,
+            strokeUniform: true,
           });
           canvas.add(rect);
           canvas.setActiveObject(rect);
           canvas.renderAll();
           saveSnapshot();
+          setToolRef.current("select");
+
         } else if (currentTool === "ellipse") {
           const ellipse = new Ellipse({
             left: pointer.x - 50,
@@ -254,60 +321,31 @@ export default function ImageEditor({ imageUrl }: Props) {
             fill: "transparent",
             stroke: colorRef.current,
             strokeWidth: strokeWidthRef.current,
+            strokeUniform: true,
           });
           canvas.add(ellipse);
           canvas.setActiveObject(ellipse);
           canvas.renderAll();
           saveSnapshot();
+          setToolRef.current("select");
+
         } else if (currentTool === "line") {
           isDrawingLineRef.current = true;
-          const line = new Line(
-            [pointer.x, pointer.y, pointer.x, pointer.y],
-            {
-              stroke: colorRef.current,
-              strokeWidth: strokeWidthRef.current,
-              selectable: false,
-              evented: false,
-            }
-          );
-          activeLineRef.current = line;
-          canvas.add(line);
-        } else if (currentTool === "crop") {
-          isCropDrawingRef.current = true;
-          cropStartRef.current = { x: pointer.x, y: pointer.y };
-          // Remove previous crop rect if any
-          if (cropRectRef.current) {
-            canvas.remove(cropRectRef.current);
-          }
-          const rect = new Rect({
-            left: pointer.x,
-            top: pointer.y,
-            width: 0,
-            height: 0,
-            fill: "rgba(59,130,246,0.15)",
-            stroke: "#3b82f6",
-            strokeWidth: 2,
-            strokeDashArray: [6, 4],
+          const line = new Line([pointer.x, pointer.y, pointer.x, pointer.y], {
+            stroke: colorRef.current,
+            strokeWidth: strokeWidthRef.current,
             selectable: false,
             evented: false,
           });
-          cropRectRef.current = rect;
-          canvas.add(rect);
+          activeLineRef.current = line;
+          canvas.add(line);
         }
       });
 
       canvas.on("mouse:move", (opt) => {
-        const pointer = canvas.getScenePoint(opt.e);
         if (toolRef.current === "line" && isDrawingLineRef.current && activeLineRef.current) {
+          const pointer = canvas.getScenePoint(opt.e);
           activeLineRef.current.set({ x2: pointer.x, y2: pointer.y });
-          canvas.renderAll();
-        } else if (toolRef.current === "crop" && isCropDrawingRef.current && cropRectRef.current && cropStartRef.current) {
-          const start = cropStartRef.current;
-          const x = Math.min(pointer.x, start.x);
-          const y = Math.min(pointer.y, start.y);
-          const w2 = Math.abs(pointer.x - start.x);
-          const h2 = Math.abs(pointer.y - start.y);
-          cropRectRef.current.set({ left: x, top: y, width: w2, height: h2 });
           canvas.renderAll();
         }
       });
@@ -321,67 +359,54 @@ export default function ImageEditor({ imageUrl }: Props) {
             activeLineRef.current = null;
           }
           saveSnapshot();
-        }
-        if (toolRef.current === "crop") {
-          isCropDrawingRef.current = false;
+          setToolRef.current("select");
         }
       });
 
-      // Save snapshot after free-draw path added
-      canvas.on("path:created", () => {
-        saveSnapshot();
-      });
+      canvas.on("path:created", () => saveSnapshot());
 
       // Keyboard shortcuts
       const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === "Delete" || e.key === "Backspace") {
-          // Don't delete if a text object is being edited
-          const active = canvas.getActiveObject() as FabricObject & { isEditing?: boolean };
-          if (active && active.isEditing) return;
+        const active = canvas.getActiveObject() as (FabricObject & { isEditing?: boolean }) | null;
+        if ((e.key === "Delete" || e.key === "Backspace") && !active?.isEditing) {
           deleteSelected();
         }
-        if ((e.ctrlKey || e.metaKey) && e.key === "z") {
-          e.preventDefault();
-          undo();
-        }
+        if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); undo(); }
+        if ((e.ctrlKey || e.metaKey) && e.key === "y") { e.preventDefault(); redo(); }
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "Z") { e.preventDefault(); redo(); }
+        if (e.key === "Escape") setToolRef.current("select");
       };
       window.addEventListener("keydown", handleKeyDown);
-
-      return () => {
-        window.removeEventListener("keydown", handleKeyDown);
-      };
+      return () => window.removeEventListener("keydown", handleKeyDown);
     };
 
     let cleanup: (() => void) | undefined;
-    init().then((fn) => {
-      cleanup = fn;
-    });
-
+    init().then((fn) => { cleanup = fn; });
     return () => {
       mounted = false;
       cleanup?.();
       fabricRef.current?.dispose();
       fabricRef.current = null;
     };
-  }, [imageUrl, saveSnapshot, deleteSelected, undo]);
+  }, [imageUrl, saveSnapshot, deleteSelected, undo, redo]);
 
-  // ── sync tool changes to canvas ──────────────────────────────────────────────
+  // ── sync tool → canvas mode ──────────────────────────────────────────────────
   useEffect(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
     canvas.isDrawingMode = tool === "draw";
-    canvas.selection = tool === "select";
-    canvas.defaultCursor = tool === "text" ? "text" : tool === "crop" ? "crosshair" : "default";
+    canvas.selection = tool !== "draw" && tool !== "crop";
+    canvas.defaultCursor =
+      tool === "crop" || tool === "line" ? "crosshair" : "default";
 
-    // Clean up orphan crop rect when leaving crop mode
-    if (tool !== "crop" && cropRectRef.current) {
-      canvas.remove(cropRectRef.current);
-      cropRectRef.current = null;
-      canvas.renderAll();
+    // Clear crop overlay when leaving crop mode
+    if (tool !== "crop") {
+      setCropOverlay(null);
+      setCropBtnPos(null);
     }
   }, [tool]);
 
-  // ── sync brush color/width ───────────────────────────────────────────────────
+  // ── sync brush ───────────────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = fabricRef.current;
     if (!canvas?.freeDrawingBrush) return;
@@ -389,17 +414,15 @@ export default function ImageEditor({ imageUrl }: Props) {
     canvas.freeDrawingBrush.width = strokeWidth;
   }, [color, strokeWidth]);
 
-  // ── save to Vercel Blob ──────────────────────────────────────────────────────
+  // ── save ─────────────────────────────────────────────────────────────────────
   const handleSave = useCallback(async () => {
     const canvas = fabricRef.current;
     if (!canvas) return;
-
     setSaving(true);
     setSaveError(null);
     setSavedUrl(null);
-
     try {
-      const dataUrl = canvas.toDataURL({ format: "png", multiplier: 1 });
+      const dataUrl = canvas.toDataURL({ format: "png", multiplier: multiplierRef.current });
       const res = await fetch("/api/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -407,7 +430,6 @@ export default function ImageEditor({ imageUrl }: Props) {
       });
       const json = (await res.json()) as { url?: string; error?: string };
       if (!res.ok || !json.url) throw new Error(json.error ?? "שגיאה בשמירה");
-
       setSavedUrl(json.url);
       window.parent.postMessage({ type: "image-editor-save", url: json.url }, "*");
     } catch (e) {
@@ -417,109 +439,17 @@ export default function ImageEditor({ imageUrl }: Props) {
     }
   }, []);
 
-  // ── render ────────────────────────────────────────────────────────────────────
-  const showColorStroke =
-    tool === "draw" || tool === "rect" || tool === "ellipse" || tool === "line";
+  const showColorStroke = tool === "draw" || tool === "rect" || tool === "ellipse" || tool === "line" || tool === "text";
 
   return (
-    <div ref={containerRef} className="flex flex-col" style={{ height: "100vh" }}>
-      {/* ── Toolbar ── */}
+    <div ref={containerRef} style={{ height: "100vh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+
+      {/* ── Toolbar: actions on LEFT, tools on RIGHT ── */}
       <div
-        dir="rtl"
         className="flex items-center gap-1.5 px-3 bg-gray-800 shadow-md flex-shrink-0"
         style={{ height: 56 }}
       >
-        {/* Tools */}
-        <ToolBtn active={tool === "select"} onClick={() => setTool("select")} title="בחר">
-          <span className="text-base">🖱</span>
-          <span>בחר</span>
-        </ToolBtn>
-        <ToolBtn active={tool === "draw"} onClick={() => setTool("draw")} title="ציור חופשי">
-          <span className="text-base">✏️</span>
-          <span>ציור</span>
-        </ToolBtn>
-        <ToolBtn active={tool === "text"} onClick={() => setTool("text")} title="טקסט">
-          <span className="text-base font-bold">T</span>
-          <span>טקסט</span>
-        </ToolBtn>
-        <ToolBtn active={tool === "rect"} onClick={() => setTool("rect")} title="מלבן">
-          <span className="text-base">▭</span>
-          <span>מלבן</span>
-        </ToolBtn>
-        <ToolBtn active={tool === "ellipse"} onClick={() => setTool("ellipse")} title="עיגול">
-          <span className="text-base">○</span>
-          <span>עיגול</span>
-        </ToolBtn>
-        <ToolBtn active={tool === "line"} onClick={() => setTool("line")} title="קו">
-          <span className="text-base">╱</span>
-          <span>קו</span>
-        </ToolBtn>
-        <ToolBtn active={tool === "crop"} onClick={() => setTool("crop")} title="חיתוך">
-          <span className="text-base">✂️</span>
-          <span>חיתוך</span>
-        </ToolBtn>
-
-        {/* Crop apply button */}
-        {tool === "crop" && (
-          <button
-            onClick={applyCrop}
-            className="px-3 py-1.5 rounded text-xs font-medium bg-blue-500 text-white hover:bg-blue-600 transition-colors"
-          >
-            החל חיתוך
-          </button>
-        )}
-
-        {/* Divider */}
-        <div className="w-px h-8 bg-gray-600 mx-1" />
-
-        {/* Color + stroke — visible when relevant */}
-        {showColorStroke && (
-          <>
-            <label className="flex flex-col items-center gap-0.5 cursor-pointer" title="צבע">
-              <input
-                type="color"
-                value={color}
-                onChange={(e) => setColor(e.target.value)}
-                className="w-7 h-7 rounded border-0 p-0 cursor-pointer"
-              />
-              <span className="text-gray-300 text-xs">צבע</span>
-            </label>
-            <label className="flex flex-col items-center gap-0.5" title="עובי">
-              <input
-                type="range"
-                min={1}
-                max={20}
-                value={strokeWidth}
-                onChange={(e) => setStrokeWidth(Number(e.target.value))}
-                className="w-20 accent-blue-400"
-              />
-              <span className="text-gray-300 text-xs">עובי {strokeWidth}</span>
-            </label>
-          </>
-        )}
-
-        <div className="flex-1" />
-
-        {/* Undo & Delete */}
-        <button
-          onClick={undo}
-          title="בטל (Ctrl+Z)"
-          className="px-2 py-1.5 rounded text-xs font-medium bg-gray-700 text-gray-200 hover:bg-gray-600 border border-gray-600"
-        >
-          ↩ בטל
-        </button>
-        <button
-          onClick={deleteSelected}
-          title="מחק בחור"
-          className="px-2 py-1.5 rounded text-xs font-medium bg-red-700 text-white hover:bg-red-600 border border-red-600"
-        >
-          🗑 מחק
-        </button>
-
-        {/* Divider */}
-        <div className="w-px h-8 bg-gray-600 mx-1" />
-
-        {/* Save */}
+        {/* LEFT: Save */}
         <button
           onClick={handleSave}
           disabled={saving || !canvasReady}
@@ -531,23 +461,138 @@ export default function ImageEditor({ imageUrl }: Props) {
         >
           {saving ? "שומר..." : savedUrl ? "✓ נשמר" : "💾 שמור"}
         </button>
+
+        <div className="w-px h-8 bg-gray-600 mx-0.5" />
+
+        {/* Undo / Redo / Delete */}
+        <button onClick={undo} title="בטל (Ctrl+Z)" className="px-2 py-1.5 rounded text-xs font-medium bg-gray-700 text-gray-200 hover:bg-gray-600 border border-gray-600">↩ בטל</button>
+        <button onClick={redo} title="שחזר (Ctrl+Y)" className="px-2 py-1.5 rounded text-xs font-medium bg-gray-700 text-gray-200 hover:bg-gray-600 border border-gray-600">↪ שחזר</button>
+        <button onClick={deleteSelected} title="מחק נבחר (Delete)" className="px-2 py-1.5 rounded text-xs font-medium bg-red-800 text-white hover:bg-red-700 border border-red-700">🗑 מחק</button>
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Color + stroke (when relevant) */}
+        {showColorStroke && (
+          <>
+            <label className="flex flex-col items-center gap-0.5 cursor-pointer" title="צבע">
+              <input
+                type="color"
+                value={color}
+                onChange={(e) => setColor(e.target.value)}
+                className="w-7 h-7 rounded border-0 p-0 cursor-pointer"
+              />
+              <span className="text-gray-400 text-xs">צבע</span>
+            </label>
+            {tool !== "text" && (
+              <label className="flex flex-col items-center gap-0.5" title="עובי">
+                <input
+                  type="range"
+                  min={1}
+                  max={20}
+                  value={strokeWidth}
+                  onChange={(e) => setStrokeWidth(Number(e.target.value))}
+                  className="w-20 accent-blue-400"
+                />
+                <span className="text-gray-400 text-xs">עובי {strokeWidth}</span>
+              </label>
+            )}
+            <div className="w-px h-8 bg-gray-600 mx-0.5" />
+          </>
+        )}
+
+        {/* RIGHT: Tools */}
+        <ToolBtn active={tool === "draw"} onClick={() => setTool("draw")} title="ציור חופשי">
+          <span>✏️</span><span>ציור</span>
+        </ToolBtn>
+        {/* Text: clicking the button places a new text element */}
+        <ToolBtn active={tool === "text"} onClick={handleAddText} title="הוסף טקסט (לחץ שוב להוספה נוספת)">
+          <span className="font-bold text-sm">T</span><span>טקסט</span>
+        </ToolBtn>
+        <ToolBtn active={tool === "rect"} onClick={() => setTool("rect")} title="מלבן">
+          <span>▭</span><span>מלבן</span>
+        </ToolBtn>
+        <ToolBtn active={tool === "ellipse"} onClick={() => setTool("ellipse")} title="עיגול">
+          <span>○</span><span>עיגול</span>
+        </ToolBtn>
+        <ToolBtn active={tool === "line"} onClick={() => setTool("line")} title="קו">
+          <span>╱</span><span>קו</span>
+        </ToolBtn>
+        <ToolBtn active={tool === "crop"} onClick={() => setTool("crop")} title="חיתוך">
+          <span>✂️</span><span>חיתוך</span>
+        </ToolBtn>
       </div>
 
-      {/* ── Canvas area ── */}
-      <div className="flex-1 overflow-auto flex items-start justify-center bg-gray-400">
+      {/* ── Canvas area: gray background, canvas centered inside ── */}
+      <div
+        className="flex-1 bg-gray-500 overflow-auto"
+        style={{ display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, position: "relative" }}
+      >
+        {/* Canvas wrapper — exactly sized to the rendered image, centered in the gray area */}
+        <div
+          style={{
+            position: "relative",
+            flexShrink: 0,
+            ...(canvasSize.w > 0 ? { width: canvasSize.w, height: canvasSize.h } : {}),
+            boxShadow: "0 4px 24px rgba(0,0,0,0.5)",
+          }}
+        >
+          <canvas ref={canvasElRef} style={{ display: "block" }} />
+
+          {/* ── Crop overlay — inside wrapper so coords are canvas-relative ── */}
+          {tool === "crop" && (
+            <div
+              style={{ position: "absolute", inset: 0, cursor: "crosshair", zIndex: 10 }}
+              onMouseDown={handleCropMouseDown}
+              onMouseMove={handleCropMouseMove}
+              onMouseUp={handleCropMouseUp}
+              onMouseLeave={handleCropMouseUp}
+            >
+              {cropOverlay && cropOverlay.w > 2 && cropOverlay.h > 2 && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: cropOverlay.x,
+                    top: cropOverlay.y,
+                    width: cropOverlay.w,
+                    height: cropOverlay.h,
+                    border: "2px dashed #3b82f6",
+                    backgroundColor: "rgba(59,130,246,0.1)",
+                    pointerEvents: "none",
+                  }}
+                />
+              )}
+              {cropBtnPos && (
+                <button
+                  style={{ position: "absolute", left: cropBtnPos.x + 6, top: cropBtnPos.y + 6, zIndex: 20 }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={applyCrop}
+                  className="px-3 py-1.5 rounded text-xs font-semibold bg-blue-500 text-white shadow-lg hover:bg-blue-600 border border-blue-400"
+                >
+                  ✂️ החל חיתוך
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Error / save-error overlays */}
         {imageLoadError && (
-          <div className="m-8 p-6 bg-red-50 rounded-lg text-red-700 text-center max-w-md">
-            <div className="text-3xl mb-2">⚠️</div>
-            <div className="font-bold mb-1">שגיאה בטעינת התמונה</div>
-            <div className="text-sm text-red-600 break-all">{imageLoadError}</div>
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div className="m-8 p-6 bg-red-50 rounded-lg text-red-700 text-center max-w-md">
+              <div className="text-3xl mb-2">⚠️</div>
+              <div className="font-bold mb-1">שגיאה בטעינת התמונה</div>
+              <div className="text-sm text-red-600 break-all">{imageLoadError}</div>
+            </div>
           </div>
         )}
         {saveError && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-red-600 text-white px-4 py-2 rounded-lg text-sm shadow-lg z-50">
+          <div style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", zIndex: 50 }}
+            className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm shadow-lg whitespace-nowrap"
+          >
             ⚠️ {saveError}
           </div>
         )}
-        <canvas ref={canvasElRef} />
       </div>
     </div>
   );
