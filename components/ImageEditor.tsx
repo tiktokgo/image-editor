@@ -66,6 +66,8 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
   const [tool, setTool] = useState<Tool>("select");
   const [color, setColor] = useState("#e53e3e");
   const [strokeWidth, setStrokeWidth] = useState(3);
+  const [fontSize, setFontSize] = useState(28);
+  const [selectedObjectType, setSelectedObjectType] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedUrl, setSavedUrl] = useState<string | null>(null);
@@ -85,6 +87,9 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
   useEffect(() => { strokeWidthRef.current = strokeWidth; }, [strokeWidth]);
   const setToolRef = useRef(setTool);
   useEffect(() => { setToolRef.current = setTool; }, []);
+  const setColorRef = useRef(setColor);
+  const setFontSizeRef = useRef(setFontSize);
+  const setSelectedObjectTypeRef = useRef(setSelectedObjectType);
 
   // ── history ──────────────────────────────────────────────────────────────────
   const saveSnapshot = useCallback(() => {
@@ -113,21 +118,17 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
     canvas.renderAll();
   }, []);
 
-  // ── delete selected ───────────────────────────────────────────────────────────
-  const deleteSelected = useCallback(() => {
+  // ── clear all drawn elements (keep background) ────────────────────────────────
+  const clearAll = useCallback(() => {
     const canvas = fabricRef.current;
     if (!canvas) return;
-    const active = canvas.getActiveObjects();
-    if (active.length === 0) return;
-    active.forEach((obj) => canvas.remove(obj));
+    canvas.getObjects().forEach((obj) => canvas.remove(obj));
     canvas.discardActiveObject();
     canvas.renderAll();
     saveSnapshot();
   }, [saveSnapshot]);
 
   // ── add text via toolbar button ───────────────────────────────────────────────
-  // Text is placed on the canvas and immediately selected (draggable).
-  // Double-click on the text to edit its content.
   const handleAddText = useCallback(() => {
     const canvas = fabricRef.current;
     const IText = ITextClassRef.current;
@@ -147,7 +148,6 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
     canvas.setActiveObject(txt);
     canvas.renderAll();
     saveSnapshot();
-    // Switch to select so the user can immediately drag/resize
     setToolRef.current("select");
   }, [saveSnapshot]);
 
@@ -194,10 +194,8 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
     const { x, y, w, h } = cropOverlay;
     if (w < 10 || h < 10) return;
 
-    // Export the selected region at original resolution
     const croppedData = canvas.toDataURL({ format: "png", left: x, top: y, width: w, height: h, multiplier: multiplierRef.current });
 
-    // Resize canvas to the cropped region (multiplierRef stays the same — same pixel:original ratio)
     canvas.setDimensions({ width: w, height: h });
     setCanvasSize({ w, h });
     canvas.getObjects().forEach((o) => canvas.remove(o));
@@ -227,14 +225,12 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
 
       if (!mounted || !canvasElRef.current) return;
 
-      // Store IText class for toolbar button
       ITextClassRef.current = IText;
 
       const TOOLBAR_H = 56;
       const maxW = window.innerWidth;
       const maxH = window.innerHeight - TOOLBAR_H;
 
-      // Start with a temporary canvas; we resize it once we know the image dimensions
       const canvas = new Canvas(canvasElRef.current, {
         width: maxW,
         height: maxH,
@@ -247,7 +243,6 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
       canvas.freeDrawingBrush.color = colorRef.current;
       canvas.freeDrawingBrush.width = strokeWidthRef.current;
 
-      // Load background image via same-origin proxy (avoids CORS canvas taint)
       const proxyUrl = `/api/image?url=${encodeURIComponent(imageUrl)}`;
       try {
         const img = await FabricImage.fromURL(proxyUrl, { crossOrigin: "anonymous" });
@@ -256,16 +251,12 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
         const imgW = img.width ?? maxW;
         const imgH = img.height ?? maxH;
 
-        // Scale to fit inside the viewport without upscaling
         const scale = Math.min(1, maxW / imgW, maxH / imgH);
         const canvasW = Math.round(imgW * scale);
         const canvasH = Math.round(imgH * scale);
 
-        // Resize canvas to exactly match the rendered image
         canvas.setDimensions({ width: canvasW, height: canvasH });
-
-        // Store multiplier: when saving, upscale back to original resolution
-        multiplierRef.current = imgW / canvasW; // = 1 / scale
+        multiplierRef.current = imgW / canvasW;
 
         img.set({ left: 0, top: 0, scaleX: scale, scaleY: scale, selectable: false, evented: false });
         canvas.backgroundImage = img;
@@ -279,23 +270,40 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
         if (mounted) setImageLoadError(String(e));
       }
 
+      // ── selection events — show color/stroke for selected object ─────────────
+      const onSelect = (obj: FabricObject | undefined) => {
+        if (!obj) return;
+        setSelectedObjectTypeRef.current(obj.type ?? null);
+        // Sync color picker to the selected object's color
+        const c = obj.type === "i-text"
+          ? (obj as unknown as { fill: string }).fill
+          : (obj as unknown as { stroke: string }).stroke;
+        if (c && typeof c === "string") setColorRef.current(c);
+        // Sync font size for text
+        if (obj.type === "i-text") {
+          const fs = (obj as unknown as { fontSize: number }).fontSize;
+          if (fs) setFontSizeRef.current(fs);
+        }
+      };
+
+      canvas.on("selection:created", (opt) => onSelect((opt as unknown as { selected: FabricObject[] }).selected?.[0]));
+      canvas.on("selection:updated", (opt) => onSelect((opt as unknown as { selected: FabricObject[] }).selected?.[0]));
+      canvas.on("selection:cleared", () => setSelectedObjectTypeRef.current(null));
+
       // ── mouse:down ───────────────────────────────────────────────────────────
       canvas.on("mouse:down", (opt) => {
         const pointer = canvas.getScenePoint(opt.e);
         const currentTool = toolRef.current;
         const target = opt.target as (FabricObject & { isEditing?: boolean; enterEditing?: () => void }) | undefined;
 
-        // In select mode, Fabric.js handles selection natively — nothing to do
         if (currentTool === "select" || currentTool === "draw" || currentTool === "crop") return;
 
-        // Clicking an existing (non-background) object → select it, don't create new
         if (target) {
           canvas.setActiveObject(target);
           canvas.renderAll();
           return;
         }
 
-        // Click on empty canvas — create new element
         if (currentTool === "rect") {
           const rect = new Rect({
             left: pointer.x - 60,
@@ -366,11 +374,10 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
 
       canvas.on("path:created", () => saveSnapshot());
 
-      // Keyboard shortcuts
       const handleKeyDown = (e: KeyboardEvent) => {
         const active = canvas.getActiveObject() as (FabricObject & { isEditing?: boolean }) | null;
         if ((e.key === "Delete" || e.key === "Backspace") && !active?.isEditing) {
-          deleteSelected();
+          clearAll();
         }
         if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); undo(); }
         if ((e.ctrlKey || e.metaKey) && e.key === "y") { e.preventDefault(); redo(); }
@@ -389,7 +396,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
       fabricRef.current?.dispose();
       fabricRef.current = null;
     };
-  }, [imageUrl, saveSnapshot, deleteSelected, undo, redo]);
+  }, [imageUrl, saveSnapshot, clearAll, undo, redo]);
 
   // ── sync tool → canvas mode ──────────────────────────────────────────────────
   useEffect(() => {
@@ -400,20 +407,42 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
     canvas.defaultCursor =
       tool === "crop" || tool === "line" ? "crosshair" : "default";
 
-    // Clear crop overlay when leaving crop mode
     if (tool !== "crop") {
       setCropOverlay(null);
       setCropBtnPos(null);
     }
   }, [tool]);
 
-  // ── sync brush ───────────────────────────────────────────────────────────────
+  // ── sync color/stroke → brush + selected object ───────────────────────────────
   useEffect(() => {
     const canvas = fabricRef.current;
-    if (!canvas?.freeDrawingBrush) return;
-    canvas.freeDrawingBrush.color = color;
-    canvas.freeDrawingBrush.width = strokeWidth;
+    if (!canvas) return;
+    if (canvas.freeDrawingBrush) {
+      canvas.freeDrawingBrush.color = color;
+      canvas.freeDrawingBrush.width = strokeWidth;
+    }
+    const active = canvas.getActiveObject() as (FabricObject & { fill?: string; stroke?: string; fontSize?: number }) | null;
+    if (active) {
+      if (active.type === "i-text") {
+        active.set("fill" as keyof FabricObject, color as unknown as never);
+      } else {
+        active.set("stroke" as keyof FabricObject, color as unknown as never);
+        active.set("strokeWidth" as keyof FabricObject, strokeWidth as unknown as never);
+      }
+      canvas.renderAll();
+    }
   }, [color, strokeWidth]);
+
+  // ── sync font size → selected text ───────────────────────────────────────────
+  useEffect(() => {
+    const canvas = fabricRef.current;
+    if (!canvas) return;
+    const active = canvas.getActiveObject();
+    if (active?.type === "i-text") {
+      active.set("fontSize" as keyof FabricObject, fontSize as unknown as never);
+      canvas.renderAll();
+    }
+  }, [fontSize]);
 
   // ── save ─────────────────────────────────────────────────────────────────────
   const handleSave = useCallback(async () => {
@@ -440,7 +469,13 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
     }
   }, [imageUrl, quoteId]);
 
-  const showColorStroke = tool === "draw" || tool === "rect" || tool === "ellipse" || tool === "line" || tool === "text";
+  // Show color picker: when a drawing tool is active OR an object is selected
+  const hasSelection = selectedObjectType !== null;
+  const showColorStroke = tool === "draw" || tool === "rect" || tool === "ellipse" || tool === "line" || tool === "text" || hasSelection;
+  // Show stroke width: not for text
+  const showStrokeSlider = tool !== "text" && selectedObjectType !== "i-text";
+  // Show font size: when text tool active or i-text selected
+  const showFontSize = tool === "text" || selectedObjectType === "i-text";
 
   return (
     <div ref={containerRef} style={{ height: "100vh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
@@ -465,15 +500,15 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
 
         <div className="w-px h-8 bg-gray-600 mx-0.5" />
 
-        {/* Undo / Redo / Delete */}
-        <button onClick={undo} title="בטל (Ctrl+Z)" className="px-2 py-1.5 rounded text-xs font-medium bg-gray-700 text-gray-200 hover:bg-gray-600 border border-gray-600">↩ בטל</button>
-        <button onClick={redo} title="שחזר (Ctrl+Y)" className="px-2 py-1.5 rounded text-xs font-medium bg-gray-700 text-gray-200 hover:bg-gray-600 border border-gray-600">↪ שחזר</button>
-        <button onClick={deleteSelected} title="מחק נבחר (Delete)" className="px-2 py-1.5 rounded text-xs font-medium bg-red-800 text-white hover:bg-red-700 border border-red-700">🗑 מחק</button>
+        {/* Undo / Redo / Clear all */}
+        <button onClick={undo} title="בטל (Ctrl+Z)" className="px-2 py-1.5 rounded text-base bg-gray-700 text-gray-200 hover:bg-gray-600 border border-gray-600">↩</button>
+        <button onClick={redo} title="שחזר (Ctrl+Y)" className="px-2 py-1.5 rounded text-base bg-gray-700 text-gray-200 hover:bg-gray-600 border border-gray-600">↪</button>
+        <button onClick={clearAll} title="נקה הכל" className="px-2 py-1.5 rounded text-base bg-red-800 text-white hover:bg-red-700 border border-red-700">🗑</button>
 
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Color + stroke (when relevant) */}
+        {/* Color + stroke + font size (when relevant) */}
         {showColorStroke && (
           <>
             <label className="flex flex-col items-center gap-0.5 cursor-pointer" title="צבע">
@@ -485,7 +520,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
               />
               <span className="text-gray-400 text-xs">צבע</span>
             </label>
-            {tool !== "text" && (
+            {showStrokeSlider && (
               <label className="flex flex-col items-center gap-0.5" title="עובי">
                 <input
                   type="range"
@@ -498,6 +533,19 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
                 <span className="text-gray-400 text-xs">עובי {strokeWidth}</span>
               </label>
             )}
+            {showFontSize && (
+              <label className="flex flex-col items-center gap-0.5" title="גודל טקסט">
+                <input
+                  type="range"
+                  min={10}
+                  max={120}
+                  value={fontSize}
+                  onChange={(e) => setFontSize(Number(e.target.value))}
+                  className="w-20 accent-blue-400"
+                />
+                <span className="text-gray-400 text-xs">גודל {fontSize}</span>
+              </label>
+            )}
             <div className="w-px h-8 bg-gray-600 mx-0.5" />
           </>
         )}
@@ -506,8 +554,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
         <ToolBtn active={tool === "draw"} onClick={() => setTool("draw")} title="ציור חופשי">
           <span>✏️</span><span>ציור</span>
         </ToolBtn>
-        {/* Text: clicking the button places a new text element */}
-        <ToolBtn active={tool === "text"} onClick={handleAddText} title="הוסף טקסט (לחץ שוב להוספה נוספת)">
+        <ToolBtn active={tool === "text"} onClick={handleAddText} title="הוסף טקסט">
           <span className="font-bold text-sm">T</span><span>טקסט</span>
         </ToolBtn>
         <ToolBtn active={tool === "rect"} onClick={() => setTool("rect")} title="מלבן">
@@ -540,7 +587,7 @@ export default function ImageEditor({ imageUrl, quoteId }: Props) {
         >
           <canvas ref={canvasElRef} style={{ display: "block" }} />
 
-          {/* ── Crop overlay — inside wrapper so coords are canvas-relative ── */}
+          {/* ── Crop overlay ── */}
           {tool === "crop" && (
             <div
               style={{ position: "absolute", inset: 0, cursor: "crosshair", zIndex: 10 }}
